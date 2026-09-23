@@ -1,10 +1,10 @@
 # NovaFin Group Capstone — ML-Driven Enterprise Financial Strategy, Risk & Decision Support
 
-[![CI](https://github.com/<YOUR-GITHUB-USERNAME>/novafin-capstone/actions/workflows/ci.yml/badge.svg)](https://github.com/<YOUR-GITHUB-USERNAME>/novafin-capstone/actions/workflows/ci.yml)
+[![CI](https://github.com/yadavdipesh/novafin-capstone/actions/workflows/ci.yml/badge.svg)](https://github.com/yadavdipesh/novafin-capstone/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/lint-ruff-informational.svg)](https://github.com/astral-sh/ruff)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/<YOUR-GITHUB-USERNAME>/novafin-capstone/blob/main/notebooks/01_setup_and_eda.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yadavdipesh/novafin-capstone/blob/main/notebooks/01_setup_and_eda.ipynb)
 
 > **ePGD in AI & Data Science, IIIT Bombay — C5 Machine Learning in Finance**
 > Capstone, Group 2 · Author: Dipesh Kumar Yadav
@@ -66,7 +66,7 @@ Data ──▶ ML Prediction ──▶ Financial Metric ──▶ Risk Assessmen
 import os
 os.environ["PYTHONHASHSEED"] = "42"
 
-!git clone https://github.com/<YOUR-GITHUB-USERNAME>/novafin-capstone.git
+!git clone https://github.com/yadavdipesh/novafin-capstone.git
 %cd novafin-capstone
 !pip install -q -r requirements.txt
 !pip install -q -e .
@@ -92,7 +92,7 @@ print("config fingerprint:", cfg.fingerprint())
 ### Local
 
 ```bash
-git clone https://github.com/<YOUR-GITHUB-USERNAME>/novafin-capstone.git
+git clone https://github.com/yadavdipesh/novafin-capstone.git
 cd novafin-capstone
 make setup      # pinned deps + editable install
 make verify     # config loads, seed pins, fingerprint prints
