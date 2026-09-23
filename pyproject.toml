@@ -21,7 +21,7 @@ authors = [{ name = "Dipesh Kumar Yadav" }]
 keywords = ["machine-learning", "finance", "credit-risk", "fraud-detection", "portfolio", "capstone"]
 
 [project.urls]
-Repository = "https://github.com/<YOUR-GITHUB-USERNAME>/novafin-capstone"
+Repository = "https://github.com/yadavdipesh/novafin-capstone"
 
 [tool.setuptools.packages.find]
 where = ["src"]
