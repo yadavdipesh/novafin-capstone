@@ -1,0 +1,18 @@
+# =============================================================================
+# novafin-capstone/environment.yml
+# -----------------------------------------------------------------------------
+# Conda environment for local development. Colab users do NOT need this - they
+# use `pip install -r requirements.txt` (see README quickstart).
+#
+# Python is pinned to 3.11 because that is what Colab ships and because torch
+# 2.4.0 + numpy 1.26.4 wheels are known-good on it. Licences are documented in
+# requirements.txt; pip is used for the ML stack so the two files cannot drift.
+# =============================================================================
+name: novafin
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip=24.2
+  - pip:
+      - -r requirements.txt

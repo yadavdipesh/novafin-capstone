@@ -1,0 +1,352 @@
+# =============================================================================
+# novafin-capstone/configs/config.yaml
+# -----------------------------------------------------------------------------
+# SINGLE SOURCE OF TRUTH for the whole project.
+#
+# Nothing else in this repository may hardcode a path, a seed, a threshold,
+# a cost, a split ratio or a column name. Every module reads this file through
+# `novafin.config.load_config()`.
+#
+# Rationale (defend this in the viva): a capstone is judged on reproducibility.
+# If a reviewer changes `seed: 42` here and re-runs `make all`, every number in
+# the report must move together. That is only possible with one config object.
+# =============================================================================
+
+project:
+  name: novafin-capstone
+  version: "0.1.0"
+  author: "Dipesh Kumar Yadav"
+  group: "Group 2 - ePGD MLDS, IIT Bombay (C5 Machine Learning in Finance)"
+  description: >
+    ML-Driven Enterprise Financial Strategy, Risk & Decision Support for
+    NovaFin Group. Nine analytical modules feeding one integrated
+    INR 1,000 crore capital-allocation decision.
+
+# -----------------------------------------------------------------------------
+# Reproducibility
+# -----------------------------------------------------------------------------
+# seed 42 is mandated by the dataset README ("Random seed: 42"). Keeping the
+# same seed as the data generator makes our resampling comparable to the
+# generating process.
+reproducibility:
+  seed: 42
+  deterministic: true          # torch.use_deterministic_algorithms + cudnn flags
+  cudnn_benchmark: false       # must be False when deterministic is True
+  n_jobs: -1                   # sklearn/LightGBM parallelism (-1 = all cores)
+  float_dtype: float32         # downcast policy for the 120k-row HFT file
+
+# -----------------------------------------------------------------------------
+# Paths. All relative paths are resolved against the repository root, which is
+# discovered at import time (see novafin/paths.py) - never hardcoded.
+#
+# COLAB: set `paths.data_raw` to your Google Drive folder, e.g.
+#   /content/drive/MyDrive/ePGD/C5 ML In Finanace/Data
+# via the `NOVAFIN_DATA_RAW` environment variable or a config override; the
+# raw course data is NOT committed to git (see academic_integrity below).
+# -----------------------------------------------------------------------------
+paths:
+  data_raw: data/raw
+  data_interim: data/interim
+  data_processed: data/processed
+  artifacts: artifacts
+  reports: reports
+  figures: reports/figures
+  tables: reports/tables
+  mlruns: mlruns
+  optuna_storage: artifacts/optuna/novafin_studies.db
+  logs: reports/logs
+
+# -----------------------------------------------------------------------------
+# Academic integrity / licensing guardrails
+# -----------------------------------------------------------------------------
+academic_integrity:
+  commit_raw_data: false       # enforced by .gitignore AND by tests
+  data_licence: "Synthetic course-supplied datasets - educational use only, not redistributed"
+  data_provenance_hashing: true  # SHA-256 every raw file into the run manifest
+  code_licence: MIT
+
+# -----------------------------------------------------------------------------
+# Dataset registry. `key` is how code refers to a file; nothing imports a
+# filename literal. `target` / `drop_always` encode the Phase-0 audit findings.
+# -----------------------------------------------------------------------------
+datasets:
+
+  initiatives:
+    filename: strategic_initiatives.csv
+    module: "M1 - Corporate Finance / Capital Allocation"
+    task: binary_classification
+    target: Historical_Success
+    id_columns: [Initiative_ID]
+    datetime_columns: []
+    categorical_columns: [Business_Unit, Risk_Rating]
+    drop_always: [Initiative_ID]
+    expected_rows: 180
+    expected_cols: 14
+    positive_rate: 0.7667          # audited 138/180 - assert on load
+    notes: >
+      n=180. Max |corr| with target is 0.121 (Expected_ROI). Expect modest
+      discrimination; report mean +/- std over repeated CV, never a single split.
+
+  loans:
+    filename: nova_loans.csv
+    module: "M2 - Credit Risk"
+    task: binary_classification
+    target: Default_Flag
+    id_columns: [Customer_ID]      # unique per row -> de-facto Loan_ID
+    datetime_columns: []
+    categorical_columns: [Customer_Type]
+    drop_always: [Customer_ID]
+    expected_rows: 5000
+    expected_cols: 14
+    positive_rate: 0.1994
+    notes: >
+      Interest_Rate is the strongest feature (corr +0.308) but is set by
+      risk-based pricing. Train dual models (with/without) - see leakage register.
+
+  transactions:
+    filename: nova_transactions.csv
+    module: "M3 - Fraud Detection"
+    task: binary_classification
+    target: Fraud_Flag
+    id_columns: [Transaction_ID]
+    datetime_columns: [Timestamp]
+    categorical_columns: [Transaction_Type, Merchant_Category, Location]
+    group_column: Customer_ID      # for GroupKFold entity-leakage cross-check
+    drop_always: [Transaction_ID]
+    expected_rows: 30000
+    expected_cols: 12
+    positive_rate: 0.0228
+    notes: >
+      Fraud rate rises 0.60% -> 12.67% across Amount deciles and
+      0.83% -> 10.30% across Amount/Historical_Avg deciles.
+
+  customers:
+    filename: nova_customers.csv
+    module: "M4 - Customer Analytics"
+    task: binary_classification
+    target: Churn_Flag
+    secondary_target: Estimated_CLV
+    id_columns: [Customer_ID]
+    datetime_columns: []
+    categorical_columns: []
+    # decision_* are engineered population percentile ranks used to answer the
+    # "contact 1,000 customers" question. They are a business ranking computed
+    # over the whole book, so they leak across the train/test split and must
+    # never be model inputs. See features/engineer.CUSTOMER_DECISION_COLUMNS.
+    drop_always:
+      - Customer_ID
+      - decision_value_rank
+      - decision_attrition_proxy
+      - decision_priority_score
+    expected_rows: 5000
+    expected_cols: 13
+    positive_rate: 0.0178
+    notes: >
+      NEGATIVE-RESULT MODULE. 89 positives; max |corr| with churn is 0.0225.
+      Report a documented null with permutation test + power analysis.
+
+  market:
+    filename: nova_market_data.csv
+    module: "M5/M6 - Equity Markets & Portfolio"
+    task: panel_regression
+    target: Return                 # RAW column - contemporaneous, see leakage
+    engineered_target: fwd_return_1d
+    id_columns: [Ticker]
+    datetime_columns: [Date]
+    categorical_columns: [Ticker, Sector]
+    drop_always: [Open, High, Low, Close, Return]   # same-row price leakage
+    expected_rows: 21855
+    expected_cols: 15
+    notes: >
+      corr(Return, same-day close-to-close) = 1.000. NEVER model the raw
+      Return column. Momentum_20D / Volatility_20D are trailing and safe.
+
+  liquidity:
+    filename: nova_liquidity.csv
+    module: "M7 - Liquidity Forecasting & Stress Testing (inferred, not in brief)"
+    task: time_series_forecast
+    target: Expected_Outflows
+    derived_target: Liquidity_Gap
+    id_columns: []
+    datetime_columns: [Date]
+    categorical_columns: []
+    drop_always: [Liquidity_Gap]   # identity: Outflows - Inflows
+    expected_rows: 1216
+    expected_cols: 13
+    notes: >
+      Liquidity_Gap == Expected_Outflows - Expected_Inflows (max dev 0.01).
+      Liquidity_Buffer is near-constant (CV 0.1%) - unusable as a target.
+
+  options:
+    filename: nova_options.csv
+    module: "M10 - Derivatives"
+    task: regression
+    target: Market_Price
+    residual_target: mispricing    # Market_Price - Black_Scholes_Price
+    id_columns: [Option_ID]
+    datetime_columns: [Expiry]
+    categorical_columns: [Underlying, Option_Type]
+    drop_always: [Option_ID]
+    # Retained on purpose: BS is the benchmark for the fair fight AND the base
+    # of the residual target. Excluded from X per-experiment, never silently.
+    acknowledged_leaks: [Black_Scholes_Price]
+    expected_rows: 10000
+    expected_cols: 11
+    notes: >
+      Black_Scholes_Price alone gives R^2 = 0.9978 on Market_Price. Run the
+      primitives-only fair fight AND the residual (mispricing) model.
+
+  hft:
+    filename: nova_hft_orderbook.csv
+    module: "M9 - High-Frequency Trading"
+    task: multiclass_classification
+    target: Price_Move_Class
+    id_columns: []
+    datetime_columns: [Timestamp]
+    categorical_columns: [Stock, Event_Type, Trade_Side]
+    group_column: Trading_Day
+    drop_always: [Future_Return_100ms, Future_Price_100ms]
+    expected_rows: 120000
+    expected_cols: 33
+    notes: >
+      Three target columns carry identical information. OBI_3Level correlates
+      +0.513 with Future_Return_100ms - the genuine microstructure signal.
+
+# -----------------------------------------------------------------------------
+# Validation strategy per module (Phase-0 section b). Implemented in Phase 2.
+# -----------------------------------------------------------------------------
+validation:
+  initiatives:
+    scheme: repeated_stratified_kfold
+    n_splits: 5
+    n_repeats: 10
+    test_size: null              # CV only; n=180 is too small for a hold-out
+  loans:
+    scheme: stratified_holdout_plus_kfold
+    n_splits: 5
+    test_size: 0.20
+  transactions:
+    scheme: time_series_split
+    n_splits: 5
+    holdout_from: "2026-06-01"   # final 3 months untouched
+    group_cross_check: true      # GroupKFold on Customer_ID
+  customers:
+    scheme: repeated_stratified_kfold
+    n_splits: 5
+    n_repeats: 10
+    test_size: null
+  market:
+    scheme: purged_walk_forward
+    n_splits: 6
+    embargo_days: 5
+    split_on: Date               # all 15 tickers of a date share a fold
+  liquidity:
+    scheme: expanding_window
+    n_splits: 5
+    horizon_days: 5
+  options:
+    scheme: group_holdout
+    group_on: [Underlying, expiry_bucket]
+    n_splits: 5
+    test_size: 0.20
+  hft:
+    scheme: walk_forward_by_day
+    train_days: 12
+    val_days: 4
+    test_days: 4
+    purge_rows: 1
+
+# -----------------------------------------------------------------------------
+# Business / finance assumptions. Every number a examiner might challenge lives
+# here, with its justification, so sensitivity analysis is a config sweep.
+# -----------------------------------------------------------------------------
+finance:
+  currency: INR
+  raw_units: lakh                # per dataset README
+  report_units: crore
+  lakh_per_crore: 100
+
+  capital_allocation:
+    total_capital_crore: 1000
+    buckets:
+      - corporate_lending
+      - retail_lending
+      - digital_banking
+      - equity_investments
+      - wealth_management
+      - high_frequency_trading
+      - derivatives_hedging
+      - liquidity_reserve
+
+  npv:
+    discount_rate: 0.12          # assumption: NovaFin cost of capital
+    horizon_years: 3             # dataset supplies Revenue_Year1..3
+    fund_threshold_enpv: 0.0     # ENPV > 0 and risk acceptable -> Fund
+    review_band_enpv: [-10.0, 0.0]
+
+  credit:
+    lgd: 0.40                    # brief's worked example
+    lgd_collateral_aware: true   # sensitivity: max(0, 1 - Collateral/Loan)
+    ead_column: Loan_Amount
+    pd_bands:                    # brief calls these illustrative - we re-derive
+      low: [0.00, 0.05]
+      medium: [0.05, 0.15]
+      high: [0.15, 0.30]
+      very_high: [0.30, 1.00]
+
+  fraud:
+    cost_missed_fraud_inr: 10000
+    cost_false_positive_inr: 500
+    threshold_search_points: 501
+
+  churn:
+    contact_budget: 1000         # the executive question
+    clv_horizon_years: 3
+
+  equity:
+    forecast_horizon_days: 1     # base case; 5 as robustness
+    rebalance_frequency: M
+    long_quantile: 0.20
+    short_quantile: 0.20
+    transaction_cost_bps: 10
+    risk_free_rate_annual: 0.06
+    trading_days_per_year: 252
+
+  liquidity_risk:
+    forecast_horizon_days: 5
+    stress_scenarios:
+      mild:    {deposit_runoff: 0.02, funding_haircut: 0.10}
+      severe:  {deposit_runoff: 0.05, funding_haircut: 0.25}
+      extreme: {deposit_runoff: 0.10, funding_haircut: 0.50}
+
+  market_risk:
+    var_confidence: [0.95, 0.99]
+    var_horizon_days: 1
+    var_methods: [historical, parametric, monte_carlo]
+    monte_carlo_paths: 10000
+
+  hft:
+    horizon_ms: 100
+    cost_per_trade_bps: 0.5
+    flat_band_bps: 0.5
+
+# -----------------------------------------------------------------------------
+# Experiment tracking (D5)
+# -----------------------------------------------------------------------------
+mlflow:
+  enabled: true
+  tracking_uri: null             # null -> file store at paths.mlruns
+  experiment_prefix: novafin
+  log_models: true
+  log_figures: true
+  leaderboard_path: reports/tables/leaderboard.csv
+
+# -----------------------------------------------------------------------------
+# Compute envelope - Colab free tier (T4, ~12 GB RAM). Phase-0 flagged that
+# nothing here exceeds it; these guards fail loudly if that ever changes.
+# -----------------------------------------------------------------------------
+compute:
+  max_dataframe_mb: 512
+  use_gpu: auto                  # auto | true | false  (false = LightGBM-only fallback)
+  colab_session_hours: 11.5
+  checkpoint_every_n_trials: 10

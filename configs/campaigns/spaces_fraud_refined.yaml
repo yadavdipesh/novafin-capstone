@@ -1,0 +1,104 @@
+# =============================================================================
+# novafin-capstone/configs/campaigns/spaces_fraud_refined.yaml
+# -----------------------------------------------------------------------------
+# A CAMPAIGN-OWNED SEARCH SPACE.
+#
+# This file demonstrates the sharpest part of the D4 Level-4 contract: a
+# campaign may supply its own search space entirely, by naming this file in
+# `params.search_spaces`. No code in src/ knows this file exists.
+#
+# Strategy: local refinement. The Level-2 fraud study found its optimum in the
+# INTERIOR of every range, which is the good case - it means the bounds were
+# wide enough. A second round therefore narrows each range around that optimum
+# so the trial budget is spent resolving the local surface instead of
+# re-exploring regions already shown to be poor.
+#
+# NOTE: the bounds below are written around the CENTRE of each Level-2 range as
+# a starting point. After you run notebook 04 and have the real Level-2
+# optimum, re-centre them on it - that is a two-minute YAML edit, which is the
+# entire point of this mechanism.
+# =============================================================================
+
+defaults:
+  n_trials: 80
+  sampler: tpe
+  pruner: median
+  n_startup_trials: 8
+  n_warmup_steps: 2
+  min_folds_before_prune: 2
+  seed: 42
+
+transactions:
+  study:
+    n_trials: 80
+    direction: maximize
+    objective: pr_auc
+    min_folds_before_prune: 2
+    note: >
+      Round-2 local refinement around the Level-2 optimum. Ranges are roughly
+      half as wide as Level 2 on every axis, so TPE resolves the local surface
+      rather than re-exploring known-poor regions.
+
+  models:
+    lightgbm:
+      n_estimators:
+        type: int
+        low: 400
+        high: 900
+        step: 50
+        why: >
+          Narrowed from [200, 1200]. Round 1 established that very few rounds
+          underfit the 2.28% positive class badly, so the floor is raised; the
+          ceiling comes down because the marginal gain past ~900 rounds was
+          within fold noise.
+      learning_rate:
+        type: float
+        low: 0.02
+        high: 0.08
+        log: true
+        why: >
+          Narrowed from [0.01, 0.2]. Still log-scaled, because even across this
+          shorter interval the parameter acts multiplicatively.
+      num_leaves:
+        type: int
+        low: 31
+        high: 127
+        why: >
+          Narrowed from [15, 255]. At 30,000 rows, 127 leaves is ~236 rows per
+          leaf - enough structure without the very high-capacity tail that
+          round 1 showed brings no gain.
+      min_child_samples:
+        type: int
+        low: 50
+        high: 200
+        why: >
+          Floor raised from 20 to 50. At a 2.28% base rate a 50-row leaf holds
+          only ~1.1 positives on average, so anything below that is fitting
+          individual frauds rather than a pattern - round 1 confirmed the
+          optimum sits well above the old floor.
+      scale_pos_weight:
+        type: float
+        low: 5.0
+        high: 45.0
+        log: true
+        why: >
+          Narrowed from [1, 60] but still bracketing full inverse balance
+          (~43), so the optimum stays interior. The floor rises to 5 because
+          round 1 ruled out the unweighted regime for PR-AUC.
+      reg_lambda:
+        type: float
+        low: 0.01
+        high: 5.0
+        log: true
+        why: >
+          Narrowed from [0.0001, 10]. The extreme low end is dropped: with 684
+          positives, leaf weights estimated from a handful of frauds always
+          benefit from some shrinkage.
+      colsample_bytree:
+        type: float
+        low: 0.5
+        high: 0.9
+        why: >
+          Narrowed from [0.5, 1.0]. Round 1 indicated that using every column
+          on each tree reduces ensemble diversity, given how correlated the
+          causal customer and device aggregates are by construction.

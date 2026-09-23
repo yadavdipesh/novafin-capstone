@@ -1,0 +1,548 @@
+# =============================================================================
+# novafin-capstone/configs/search_spaces.yaml
+# -----------------------------------------------------------------------------
+# D4 LEVEL 2 - hyper-parameter search spaces, declared in YAML with a WRITTEN
+# RATIONALE for every range.
+#
+# Why the rationale is part of the artefact, not a comment I could have omitted:
+# an examiner's first question about any search space is "why those bounds?".
+# A range copied from a blog post cannot be defended. Every entry below states
+# what the parameter does, why the bounds are what they are for THIS dataset,
+# and - where it matters - what happens at each end of the range.
+#
+# Two rules run through all of it:
+#
+#   1. Bounds are derived from the DATA SIZE, not from convention. With 180
+#      rows (initiatives), `num_leaves` above ~15 cannot be filled; with
+#      30,000 rows (fraud) a `min_child_samples` of 5 is noise-fitting.
+#   2. Log scale is used wherever the parameter acts multiplicatively -
+#      learning rate, regularisation, C. Sampling `learning_rate` uniformly in
+#      [0.01, 0.3] spends 2/3 of the trials above 0.1, which is the wrong end
+#      for small data.
+#
+# Schema per parameter:
+#   type   : float | int | categorical | bool
+#   low/high, step, log  (numeric)   |  choices (categorical)
+#   why    : the rationale. REQUIRED - validate_search_space() rejects a
+#            parameter without one, so the discipline is enforced, not hoped for.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Study-level defaults. Overridable per module and per Level-4 campaign.
+# -----------------------------------------------------------------------------
+defaults:
+  n_trials: 50
+  timeout_seconds: 1800          # 30 min - a Colab session is ~11.5 h total
+  sampler: tpe                   # Tree-structured Parzen Estimator
+  pruner: median
+  n_startup_trials: 10           # random trials before TPE starts modelling
+  n_warmup_steps: 2              # NEVER prune before 2 folds have reported
+  min_folds_before_prune: 2      # see the note below - this one matters
+  direction: maximize
+  seed: 42
+
+# NOTE ON PRUNING, because this is the subtle part.
+# Optuna prunes a trial by comparing its intermediate value at step k against
+# other trials at the same step. If step k = fold 1, a trial is killed on the
+# evidence of a SINGLE fold. Phase 2 measured a per-fold AUC standard error of
+# 0.096 on the initiatives module and 0.070 on churn - so fold-1 noise alone
+# spans a wider range than the difference between a good and a bad
+# configuration. Pruning on fold 1 there would select for "suits fold 1", not
+# "generalises".
+#
+# Hence `min_folds_before_prune: 2` globally, raised to 3 on the two
+# low-power modules. Pruning still saves most of the wasted compute - a
+# hopeless trial dies after 3 of 50 fits - without making the selection noisy.
+
+# =============================================================================
+# M1 - Strategic initiatives.  180 rows, 138 positives, 42 negatives.
+# Objective: pr_auc. Per-fold AUC standard error 0.096 (Phase 2) - this is the
+# LOWEST-POWER module in the project, so the spaces are deliberately narrow and
+# skewed hard toward regularisation.
+# =============================================================================
+initiatives:
+  study:
+    n_trials: 40
+    direction: maximize
+    objective: pr_auc
+    min_folds_before_prune: 3    # 0.096 fold noise - 2 folds is not enough
+  models:
+    logistic_l2:
+      C:
+        type: float
+        low: 0.001
+        high: 10.0
+        log: true
+        why: >
+          Inverse regularisation strength. Log scale because C acts
+          multiplicatively. The low end (0.001) is near-total shrinkage, which
+          is a genuine candidate with 42 negatives; the high end is capped at
+          10 rather than the usual 100 because an unpenalised logistic
+          regression on 180 rows will separate perfectly on noise.
+      class_weight:
+        type: categorical
+        choices: [balanced, null]
+        why: >
+          The target is 76.7% POSITIVE - the imbalance is inverted relative to
+          the usual case. Both are offered because rebalancing helps recall on
+          the 42 failures but distorts the probability calibration that
+          Expected NPV = P(success) x NPV depends on.
+    random_forest:
+      n_estimators:
+        type: int
+        low: 100
+        high: 600
+        step: 50
+        why: >
+          More trees only reduce variance; they never overfit. The upper bound
+          is set by runtime, not by statistics - 600 trees on 180 rows is under
+          a second.
+      max_depth:
+        type: int
+        low: 2
+        high: 6
+        why: >
+          A depth-6 tree can isolate 64 leaves; with 42 negatives that is one
+          negative per leaf at best. The ceiling is a hard statistical limit
+          here, not a preference.
+      min_samples_leaf:
+        type: int
+        low: 5
+        high: 30
+        why: >
+          At 180 rows, a leaf of 5 is 2.8% of the data. The floor stops the
+          forest memorising individual initiatives; the ceiling (30 = 17% of
+          rows) is the most aggressive smoothing worth trying.
+      max_features:
+        type: categorical
+        choices: [sqrt, log2, 0.5]
+        why: >
+          Feature subsampling is the main decorrelation lever in a random
+          forest. With ~20 engineered features, sqrt gives 4 per split and
+          log2 gives 4 as well, so 0.5 is included to span a genuinely
+          different regime.
+    lightgbm:
+      n_estimators:
+        type: int
+        low: 50
+        high: 400
+        step: 25
+        why: >
+          Boosting DOES overfit with more rounds, so this is a real tuning
+          axis, unlike the random forest count. The low end matters on 180
+          rows: 50 rounds at a small learning rate may already be enough.
+      learning_rate:
+        type: float
+        low: 0.005
+        high: 0.2
+        log: true
+        why: >
+          Log scale. Small data rewards small steps with more rounds; the
+          upper bound stays below the 0.3 default because a single large step
+          can fit a noise direction that later rounds cannot undo.
+      num_leaves:
+        type: int
+        low: 3
+        high: 15
+        why: >
+          The single most important LightGBM capacity parameter. 15 leaves on
+          180 rows is 12 rows per leaf - already at the limit. The library
+          default of 31 is simply not reachable here, which is exactly why
+          copying a default search space would be wrong.
+      min_child_samples:
+        type: int
+        low: 5
+        high: 40
+        why: >
+          Minimum rows in a leaf. Interacts directly with num_leaves; Optuna's
+          TPE models that interaction, which grid search over the same ranges
+          would not.
+      reg_lambda:
+        type: float
+        low: 0.1
+        high: 50.0
+        log: true
+        why: >
+          L2 on leaf weights. The range extends to 50 (far above the default
+          0) because heavy shrinkage is the right regime at this sample size.
+      subsample:
+        type: float
+        low: 0.6
+        high: 1.0
+        why: >
+          Row subsampling per boosting round. Below 0.6 on 180 rows a round
+          sees fewer than 108 examples, which adds variance without adding
+          useful diversity.
+      colsample_bytree:
+        type: float
+        low: 0.5
+        high: 1.0
+        why: Column subsampling - the decorrelation lever, as in the forest.
+
+# =============================================================================
+# M2 - Credit risk.  5,000 rows, 997 defaults (19.94%).
+# Objective: ks (the credit-industry standard). Brier is reported alongside
+# because PD feeds ECL = PD x LGD x EAD and a mis-calibrated PD produces the
+# wrong money.
+# =============================================================================
+loans:
+  study:
+    n_trials: 60
+    direction: maximize
+    objective: ks
+    min_folds_before_prune: 2
+  models:
+    logistic_l2:
+      C:
+        type: float
+        low: 0.001
+        high: 100.0
+        log: true
+        why: >
+          Wider at the top than M1 because 5,000 rows can support a
+          lightly-regularised fit. Still log-scaled.
+    random_forest:
+      n_estimators: {type: int, low: 200, high: 800, step: 100,
+                     why: "Variance reduction only; bounded by runtime."}
+      max_depth: {type: int, low: 4, high: 16,
+                  why: "5,000 rows supports real depth. 16 allows 65k leaves in
+                        principle, so min_samples_leaf is the binding constraint."}
+      min_samples_leaf: {type: int, low: 5, high: 100,
+                         why: "The true capacity control. 100 rows/leaf = 2% of
+                               the data, a strongly smoothed model."}
+      max_features: {type: categorical, choices: [sqrt, log2, 0.3, 0.6],
+                     why: "~30 features after engineering; four regimes span
+                           strong to weak decorrelation."}
+    lightgbm:
+      n_estimators: {type: int, low: 100, high: 1000, step: 50,
+                     why: "Paired with learning_rate - the two trade off, and
+                           TPE exploits that correlation."}
+      learning_rate: {type: float, low: 0.01, high: 0.3, log: true,
+                      why: "Full conventional range; 5,000 rows tolerates
+                            larger steps than M1."}
+      num_leaves: {type: int, low: 7, high: 127,
+                   why: "127 leaves = ~39 rows/leaf at this sample size, which
+                         is the realistic ceiling."}
+      min_child_samples: {type: int, low: 10, high: 200,
+                          why: "The regularisation counterweight to num_leaves."}
+      reg_alpha: {type: float, low: 0.0001, high: 10.0, log: true,
+                  why: "L1 - drives weak leaf weights to zero, a useful sparsity
+                        pressure given the known noise column Sector_Risk."}
+      reg_lambda: {type: float, low: 0.0001, high: 10.0, log: true,
+                   why: "L2 - smooth shrinkage of all leaf weights."}
+      subsample: {type: float, low: 0.6, high: 1.0,
+                  why: "Row subsampling per boosting round - stochastic gradient
+                        boosting. Adds ensemble diversity and acts as implicit
+                        regularisation on 5,000 rows."}
+      subsample_freq: {type: int, low: 0, high: 5,
+                       why: "LightGBM ignores subsample unless subsample_freq > 0 -
+                             a documented footgun that silently disables the
+                             parameter above."}
+      colsample_bytree: {type: float, low: 0.5, high: 1.0,
+                         why: "Column subsampling per tree. With ~30 engineered
+                               credit features, many of which are ratios of the
+                               same underlying amounts, decorrelating the
+                               ensemble matters more than seeing every column."}
+    xgboost:
+      n_estimators: {type: int, low: 100, high: 800, step: 50,
+                     why: "Boosting rounds. Capped slightly below the LightGBM
+                           range because XGBoost grows level-wise and each
+                           round is more expensive at equal depth."}
+      learning_rate: {type: float, low: 0.01, high: 0.3, log: true,
+                      why: "Shrinkage per round. Log-scaled because it acts
+                            multiplicatively, and it trades off directly
+                            against n_estimators - a correlation TPE exploits."}
+      max_depth: {type: int, low: 3, high: 10,
+                  why: "XGBoost grows level-wise, so depth is its direct capacity
+                        control - not the leaf count LightGBM uses."}
+      min_child_weight: {type: float, low: 1.0, high: 50.0, log: true,
+                         why: "Minimum summed Hessian in a child. For logistic
+                               loss this is roughly the effective sample count,
+                               so it is XGBoost's min_child_samples analogue."}
+      gamma: {type: float, low: 0.0001, high: 5.0, log: true,
+              why: "Minimum loss reduction to split - a direct complexity price."}
+      subsample: {type: float, low: 0.6, high: 1.0,
+                  why: "Row subsampling per round. Below 0.6 of 5,000 rows a
+                        round sees under 3,000 examples, adding variance without
+                        useful ensemble diversity."}
+      colsample_bytree: {type: float, low: 0.5, high: 1.0,
+                         why: "Column subsampling per tree - the decorrelation
+                               lever, as in the random forest."}
+
+# =============================================================================
+# M3 - Fraud.  30,000 rows, 684 positives (2.28%), ratio ~43:1.
+# Objective: pr_auc. ROC-AUC flatters at this base rate; the cost-optimal
+# threshold is then found separately, on out-of-fold predictions.
+# =============================================================================
+transactions:
+  study:
+    n_trials: 60
+    direction: maximize
+    objective: pr_auc
+    min_folds_before_prune: 2
+  models:
+    logistic_balanced:
+      C: {type: float, low: 0.001, high: 10.0, log: true,
+          why: "Log scale; 30,000 rows supports a lightly regularised fit."}
+    lightgbm:
+      n_estimators: {type: int, low: 200, high: 1200, step: 100,
+                     why: "Large data supports more rounds before overfitting."}
+      learning_rate: {type: float, low: 0.01, high: 0.2, log: true,
+                      why: "Capped below 0.3: with 684 positives a large step
+                            can be dominated by a handful of them."}
+      num_leaves: {type: int, low: 15, high: 255,
+                   why: "30,000 rows supports genuine capacity; 255 leaves is
+                         ~118 rows/leaf."}
+      min_child_samples: {type: int, low: 20, high: 300,
+                          why: "CRITICAL at a 2.28% base rate. A leaf of 20 rows
+                                contains on average 0.46 positives - such a leaf
+                                is fitting individual frauds, not a pattern."}
+      scale_pos_weight: {type: float, low: 1.0, high: 60.0, log: true,
+                         why: "Class weighting. 1.0 = none, ~43 = full inverse
+                               balance; the range spans both and slightly beyond
+                               so the optimum is interior, not at a boundary.
+                               Chosen over SMOTE: synthetic minority rows invent
+                               transactions that never happened and destroy the
+                               calibration the cost threshold depends on."}
+      reg_lambda: {type: float, low: 0.0001, high: 10.0, log: true,
+                   why: "L2 penalty on leaf weights. With 684 positives, leaf
+                         weights estimated from a handful of frauds need
+                         shrinking toward zero; the log range spans none to heavy."}
+      subsample: {type: float, low: 0.6, high: 1.0,
+                  why: "Row subsampling. Kept above 0.6 so that each round still
+                        sees a usable number of the rare positive class."}
+      subsample_freq: {type: int, low: 1, high: 5,
+                       why: "How often to resample rows. Must be >= 1 or LightGBM
+                             silently ignores subsample entirely - a documented
+                             footgun that quietly disables the parameter above."}
+      colsample_bytree: {type: float, low: 0.5, high: 1.0,
+                         why: "Column subsampling. The causal customer and device
+                               aggregates are correlated by construction, so
+                               decorrelating trees is worthwhile."}
+
+# =============================================================================
+# M4 - Churn.  5,000 rows, 89 positives (1.78%).
+# Objective: pr_auc, but the DESIGNED OUTPUT of this module is a null result
+# with a permutation test attached (finding N-01). Phase 2 measured a per-fold
+# AUC standard error of 0.070 - a 95% interval of +/-0.137.
+#
+# Tuning here is run to demonstrate that a fair attempt was made. It is NOT run
+# to find a configuration that clears 0.5, and the search is kept short
+# precisely so the exercise cannot become the search for a lucky seed.
+# =============================================================================
+customers:
+  study:
+    n_trials: 30
+    direction: maximize
+    objective: pr_auc
+    min_folds_before_prune: 3    # 0.070 fold noise
+    note: >
+      A short study on purpose. With 89 positives, running 500 trials would
+      eventually surface a configuration with a flattering CV score, and that
+      score would be selection noise rather than signal. The permutation test
+      in notebook 03 is the honest measurement.
+  models:
+    logistic_balanced:
+      C: {type: float, low: 0.0001, high: 1.0, log: true,
+          why: "Capped at 1.0 - the upper half of the usual range cannot be
+                justified with 89 positives."}
+    lightgbm:
+      n_estimators: {type: int, low: 50, high: 300, step: 25,
+                     why: "Deliberately small. With 89 positives, more rounds
+                           mean more opportunity to fit individual churners;
+                           the ceiling is a guard against that, not a budget."}
+      learning_rate: {type: float, low: 0.01, high: 0.1, log: true,
+                      why: "Small steps only. A large step on 89 positives can
+                            be dominated by two or three of them, and the fit
+                            that follows cannot undo it."}
+      num_leaves: {type: int, low: 3, high: 31, why: "Tight capacity ceiling."}
+      min_child_samples: {type: int, low: 20, high: 200,
+                          why: "A leaf of 20 holds 0.36 positives on average."}
+      scale_pos_weight: {type: float, low: 1.0, high: 80.0, log: true,
+                         why: "Full inverse balance is ~55; the range spans it."}
+      reg_lambda: {type: float, low: 0.01, high: 50.0, log: true,
+                   why: "Heavy shrinkage is the right regime."}
+
+# =============================================================================
+# M5/M6 - Equity panel.  21,840 rows after the forward target, 15 tickers.
+# Objective: mean_ic (cross-sectional rank information coefficient).
+#
+# The signal-to-noise ratio in daily equity returns is tiny. A model with real
+# capacity will fit noise perfectly and produce a NEGATIVE out-of-sample IC, so
+# every space below is pulled hard toward regularisation.
+# =============================================================================
+market:
+  study:
+    n_trials: 50
+    direction: maximize
+    objective: mean_ic
+    min_folds_before_prune: 2
+  models:
+    ridge:
+      alpha: {type: float, low: 0.1, high: 1000.0, log: true,
+              why: "The upper bound is deliberately extreme. On daily returns
+                    the optimal alpha is often very large - near-total shrinkage
+                    genuinely beats a fitted model, and the range must be able
+                    to express that."}
+    elasticnet:
+      alpha: {type: float, low: 0.00001, high: 0.1, log: true,
+              why: "ElasticNet alpha scales with the target, and daily returns
+                    are ~0.01 in magnitude - so the useful range sits orders of
+                    magnitude below Ridge's."}
+      l1_ratio: {type: float, low: 0.0, high: 1.0,
+                 why: "0 = pure L2, 1 = pure Lasso. Left wide because feature
+                       selection may or may not help here, and that is an
+                       empirical question."}
+    lightgbm:
+      n_estimators: {type: int, low: 50, high: 500, step: 50,
+                     why: "Modest by design. On daily equity returns extra
+                           rounds fit noise, and an over-fitted model produces a
+                           NEGATIVE out-of-sample information coefficient."}
+      learning_rate: {type: float, low: 0.005, high: 0.1, log: true,
+                      why: "Small steps - the signal is a tiny fraction of the
+                            variance."}
+      num_leaves: {type: int, low: 3, high: 31,
+                   why: "Capped far below what 21,840 rows would normally allow.
+                         Capacity is not the constraint here; noise is."}
+      min_child_samples: {type: int, low: 50, high: 500,
+                          why: "Large leaves. A leaf of 50 daily observations is
+                                still a thin basis for a return forecast."}
+      reg_lambda: {type: float, low: 0.1, high: 100.0, log: true,
+                   why: "Heavy L2 by design. The floor of 0.1 is already above
+                         the library default of 0, because unregularised leaf
+                         weights on daily returns are fitted noise."}
+      subsample: {type: float, low: 0.5, high: 1.0,
+                  why: "Row subsampling. A wider range than other modules: on a
+                        low signal-to-noise target, aggressive bagging is one of
+                        the few reliable variance reducers."}
+      subsample_freq: {type: int, low: 1, high: 5, why: "Or subsample is ignored."}
+      colsample_bytree: {type: float, low: 0.3, high: 0.8,
+                         why: "Aggressive column sampling - with ~30 correlated
+                               technical features, decorrelation matters more
+                               than seeing every feature."}
+
+# =============================================================================
+# M7 - Liquidity.  1,211 rows after the 5-day forward target. Single series.
+# Objective: mae, MINIMISED - note the direction flip.
+# =============================================================================
+liquidity:
+  study:
+    n_trials: 40
+    direction: minimize
+    objective: mae
+    min_folds_before_prune: 2
+  models:
+    ridge:
+      alpha: {type: float, low: 0.01, high: 100.0, log: true,
+              why: "Standard range; the lagged features are highly collinear by
+                    construction, which is exactly what Ridge handles."}
+    lightgbm:
+      n_estimators: {type: int, low: 50, high: 400, step: 25,
+                     why: "Bounded by the sample: 1,211 business days after the
+                           5-day forward target, so several hundred rounds is
+                           already generous."}
+      learning_rate: {type: float, low: 0.01, high: 0.2, log: true,
+                      why: "Log-scaled shrinkage. Capped below 0.3 because a
+                            single large step on a short series can chase one
+                            month-end spike."}
+      num_leaves: {type: int, low: 3, high: 31,
+                   why: "31 leaves on 1,211 rows is ~39 rows/leaf - the ceiling."}
+      min_child_samples: {type: int, low: 5, high: 80, why: "Capacity counterweight."}
+      reg_lambda: {type: float, low: 0.01, high: 20.0, log: true,
+                   why: "L2 on leaf weights. The lagged deposit and funding
+                         features are highly collinear by construction, so
+                         shrinkage stabilises the fit."}
+
+# =============================================================================
+# M10 - Derivatives.  10,000 options.
+# Objective: rmse, MINIMISED.
+#
+# Run twice, per leakage-register L-04:
+#   fair fight : primitives only (S, K, T, sigma, r, type) vs the BS formula
+#   residual   : target = Market_Price - Black_Scholes_Price
+# Same spaces, different X and y - which is why they are not duplicated here.
+# =============================================================================
+options:
+  study:
+    n_trials: 50
+    direction: minimize
+    objective: rmse
+    min_folds_before_prune: 2
+  models:
+    random_forest:
+      n_estimators: {type: int, low: 100, high: 500, step: 50,
+                     why: "More trees only reduce variance in a random forest, so
+                           the bound is set by runtime on 10,000 options rather
+                           than by any overfitting risk."}
+      max_depth: {type: int, low: 6, high: 20,
+                  why: "Option pricing is a SMOOTH deterministic function of six
+                        inputs, so deep trees are appropriate here in a way they
+                        are not for a noisy financial target."}
+      min_samples_leaf: {type: int, low: 1, high: 20,
+                         why: "The floor of 1 is legitimate for the same reason -
+                               there is almost no label noise to memorise."}
+    lightgbm:
+      n_estimators: {type: int, low: 200, high: 1500, step: 100,
+                     why: "A smooth surface rewards many small steps."}
+      learning_rate: {type: float, low: 0.01, high: 0.3, log: true,
+                      why: "Full conventional range, log-scaled. A smooth target
+                            surface tolerates larger steps than a noisy one."}
+      num_leaves: {type: int, low: 15, high: 255,
+                   why: "High capacity is justified here: the task is
+                         approximating a known analytic function, not
+                         forecasting a noisy outcome."}
+      min_child_samples: {type: int, low: 5, high: 100,
+                          why: "The floor of 5 is legitimate because there is
+                                almost no label noise to memorise - Market_Price
+                                is Black-Scholes plus a small residual."}
+      reg_lambda: {type: float, low: 0.0001, high: 5.0, log: true,
+                   why: "Light L2 only. Heavy shrinkage would bias the fit away
+                         from a deterministic surface it can legitimately learn."}
+    mlp:
+      hidden_layer_sizes:
+        type: categorical
+        choices: [[32], [64], [64, 64], [128, 64], [128, 128, 64]]
+        why: >
+          Black-Scholes is a smooth function of six variables, so an MLP is a
+          genuinely suitable approximator - the one place in this project where
+          a neural network is the natural choice rather than an affectation.
+          The choices span one to three layers.
+      alpha: {type: float, low: 0.00001, high: 0.1, log: true,
+              why: "L2 penalty. Log scale over five orders of magnitude."}
+      learning_rate_init: {type: float, low: 0.0001, high: 0.01, log: true,
+                           why: "Adam's initial step."}
+
+# =============================================================================
+# M9 - HFT.  120,000 rows, 3 classes (UP 41.7 / DOWN 41.9 / FLAT 16.4%).
+# Objective: macro_f1 - accuracy would be dominated by UP/DOWN and would hide a
+# model that never predicts FLAT at all.
+# =============================================================================
+hft:
+  study:
+    n_trials: 40
+    timeout_seconds: 2400
+    direction: maximize
+    objective: macro_f1
+    min_folds_before_prune: 1    # single train/val split by design, not K-fold
+  models:
+    lightgbm:
+      n_estimators: {type: int, low: 100, high: 800, step: 50,
+                     why: "Bounded by runtime: 120,000 rows x 3 classes means
+                           LightGBM fits three models per round."}
+      learning_rate: {type: float, low: 0.02, high: 0.3, log: true,
+                      why: "Larger steps are affordable - 120,000 rows is a lot
+                            of evidence per split."}
+      num_leaves: {type: int, low: 15, high: 255, why: "Large data supports capacity."}
+      min_child_samples: {type: int, low: 50, high: 500,
+                          why: "High floor: adjacent order-book ticks are highly
+                                autocorrelated, so the EFFECTIVE sample size is
+                                far below 120,000 and small leaves fit
+                                microstructure noise."}
+      reg_lambda: {type: float, low: 0.001, high: 10.0, log: true,
+                   why: "L2 on leaf weights. Adjacent order-book ticks are highly
+                         autocorrelated, so the effective sample size is far
+                         below 120,000 and shrinkage guards against that."}
+      colsample_bytree: {type: float, low: 0.4, high: 1.0,
+                         why: "The book features (OBI at 3 levels, microprice,
+                               spread) are strongly correlated; column sampling
+                               decorrelates the ensemble."}

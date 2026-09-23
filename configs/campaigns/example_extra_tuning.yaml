@@ -1,0 +1,144 @@
+# =============================================================================
+# novafin-capstone/configs/campaigns/example_extra_tuning.yaml
+# -----------------------------------------------------------------------------
+# THE WORKED EXAMPLE the D4 Level-4 brief asks for.
+#
+# Scenario. The Level-2 studies are finished and the results are in the
+# leaderboard. Three follow-up questions arrive - the kind that actually arrive
+# after a first round of results:
+#
+#   1. "The credit model looks close. What if you search harder?"
+#   2. "Would combining the models beat any single one?"
+#   3. "Our fraud team says a missed fraud really costs 25,000, not 10,000.
+#       What changes?"
+#
+# Answering all three requires ZERO changes to any file in src/. This file is
+# the whole answer. Run it with:
+#
+#     make campaign CAMPAIGN=configs/campaigns/example_extra_tuning.yaml
+#
+# Validate it first, without fitting anything:
+#
+#     make campaign-dry CAMPAIGN=configs/campaigns/example_extra_tuning.yaml
+# =============================================================================
+
+name: extra_tuning_round2
+description: >
+  Follow-up campaign after the Level-2 studies. Searches the credit space
+  harder, stacks the fraud models, re-prices the fraud threshold under a
+  revised cost assumption, and runs a staged-boosting schedule on credit.
+author: Dipesh Kumar Yadav
+
+steps:
+
+  # ---------------------------------------------------------------------------
+  # 1. MORE TRIALS. The Level-2 credit study ran 60 trials; this extends the
+  #    search to 200. The `study_suffix` keeps it in a SEPARATE Optuna study,
+  #    so the Level-2 result stays intact and the two are comparable.
+  # ---------------------------------------------------------------------------
+  - module: loans
+    operation: tune
+    models: [lightgbm, xgboost]
+    enabled: true
+    note: >
+      Level 2 ran 60 trials on LightGBM only. Extend to 200 and include
+      XGBoost, to test whether the level-wise growth strategy suits this
+      feature set better than LightGBM's leaf-wise growth.
+    params:
+      n_trials: 200
+      timeout_seconds: 2700
+      study_suffix: round2
+
+  # ---------------------------------------------------------------------------
+  # 2. A NEW SEARCH SPACE. Point `tune` at a different YAML file entirely.
+  #    This is the "new search space, zero code changes" requirement, literally.
+  #    The file below narrows every range around the Level-2 optimum.
+  # ---------------------------------------------------------------------------
+  - module: transactions
+    operation: tune
+    models: [lightgbm]
+    enabled: true
+    note: >
+      Local refinement. The Level-2 optimum sat in the interior of every range,
+      so a narrowed space centred on it spends trials where they matter instead
+      of re-exploring regions already shown to be poor.
+    params:
+      n_trials: 80
+      search_spaces: configs/campaigns/spaces_fraud_refined.yaml
+      study_suffix: refined
+
+  # ---------------------------------------------------------------------------
+  # 3. STACKING. A meta-learner over the base models' OUT-OF-FOLD predictions -
+  #    the only correct way to stack. In-sample predictions would teach the
+  #    meta-learner to trust whichever base model overfits hardest.
+  # ---------------------------------------------------------------------------
+  - module: transactions
+    operation: stack
+    models: [logistic_balanced, lightgbm, lightgbm_unweighted]
+    enabled: true
+    note: >
+      The weighted and unweighted LightGBM models make different errors by
+      construction, and the linear model is decorrelated from both. Stack them
+      with a shrunk logistic meta-learner and report the stack ALONGSIDE its
+      base models, so the comparison is honest.
+    params:
+      meta_model: sklearn.linear_model.LogisticRegression
+      meta_params: {C: 0.5, max_iter: 2000}
+      meta_scale: true
+
+  # ---------------------------------------------------------------------------
+  # 4. THRESHOLD OPTIMISATION under a revised cost assumption. Retrains
+  #    NOTHING - the threshold is a decision parameter, not a model parameter,
+  #    so a cost sensitivity is seconds rather than an hour.
+  # ---------------------------------------------------------------------------
+  - module: transactions
+    operation: threshold
+    models: [lightgbm]
+    enabled: true
+    note: >
+      Sensitivity to the fraud team's revised estimate: a missed fraud costs
+      25,000 rather than the brief's 10,000, with investigation cost unchanged.
+      A higher miss cost should push the optimal threshold DOWN (flag more,
+      investigate more), and the campaign quantifies by how much.
+    params:
+      cost_false_negative: 25000
+      cost_false_positive: 500
+
+  # ---------------------------------------------------------------------------
+  # 5. LEVEL-3 STAGED BOOSTING, declared from YAML. Coarse, refine, polish:
+  #    the learning rate falls ~3x per stage while capacity rises and
+  #    regularisation tightens.
+  # ---------------------------------------------------------------------------
+  - module: loans
+    operation: finetune
+    enabled: true
+    note: >
+      Warm-start boosting on the credit model. Each stage continues the
+      previous booster via init_model rather than refitting, so the learning
+      schedule itself changes across stages - which a single fit cannot do.
+    params:
+      objective: ks
+      patience: 2
+      base_params:
+        min_data_in_leaf: 40
+        feature_fraction: 0.8
+      schedule:
+        - {n_estimators: 200, learning_rate: 0.10, num_leaves: 15, lambda_l2: 0.1}
+        - {n_estimators: 200, learning_rate: 0.03, num_leaves: 31, lambda_l2: 1.0}
+        - {n_estimators: 200, learning_rate: 0.01, num_leaves: 63, lambda_l2: 5.0}
+
+  # ---------------------------------------------------------------------------
+  # 6. A DISABLED STEP. Kept in the file as a record of something considered
+  #    and deferred - `enabled: false` is better documentation than deletion.
+  # ---------------------------------------------------------------------------
+  - module: market
+    operation: tune
+    models: [lightgbm]
+    enabled: false
+    note: >
+      Deferred. The Level-2 equity study pushed to the regularised end of every
+      range, which suggests the ceiling is the data's signal-to-noise ratio
+      rather than the search budget. More trials would not change that
+      conclusion, so the budget is better spent elsewhere.
+    params:
+      n_trials: 150

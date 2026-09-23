@@ -1,0 +1,58 @@
+# =============================================================================
+# novafin-capstone/pyproject.toml
+# -----------------------------------------------------------------------------
+# src/ layout: the package is NOT importable from the repo root by accident.
+# That is deliberate - it forces `pip install -e .`, which means the code you
+# test is the code that is installed, and a missing module fails immediately
+# instead of working locally and breaking in Colab.
+# =============================================================================
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "novafin-capstone"
+version = "0.1.0"
+description = "ML-Driven Enterprise Financial Strategy, Risk & Decision Support (NovaFin Group capstone)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Dipesh Kumar Yadav" }]
+keywords = ["machine-learning", "finance", "credit-risk", "fraud-detection", "portfolio", "capstone"]
+
+[project.urls]
+Repository = "https://github.com/<YOUR-GITHUB-USERNAME>/novafin-capstone"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+novafin = ["py.typed"]
+
+# --- pytest ------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+markers = [
+    "slow: tests that train a model (deselect with '-m \"not slow\"')",
+    "needs_data: tests that require the raw CSVs to be present",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+# --- ruff --------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "ARG", "PTH", "RUF"]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "N803",    # X, y are the conventional ML argument names
+    "N806",    # X_train et al. are conventional too
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002"]

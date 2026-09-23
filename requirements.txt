@@ -1,0 +1,76 @@
+# =============================================================================
+# novafin-capstone/requirements.txt
+# -----------------------------------------------------------------------------
+# Pinned, 100% free and open-source. Every package is listed with its LICENCE,
+# as required by the capstone constraints. No paid APIs, no keys, no
+# proprietary services anywhere in this file.
+#
+# Colab usage:
+#   !git clone <REPO_URL> && cd novafin-capstone && pip install -q -r requirements.txt
+#
+# Pinning policy: exact `==` pins. A capstone is graded on reproducibility, and
+# a `>=` pin means the examiner's run can differ from yours because a package
+# shipped a new default six weeks later (sklearn changes defaults regularly).
+# =============================================================================
+
+# --- core scientific stack ---------------------------------------------------
+numpy==1.26.4                  # BSD-3-Clause
+pandas==2.2.2                  # BSD-3-Clause
+scipy==1.13.1                  # BSD-3-Clause
+pyarrow==17.0.0                # Apache-2.0   (fast parquet for interim data)
+
+# --- classical ML ------------------------------------------------------------
+scikit-learn==1.5.1            # BSD-3-Clause
+imbalanced-learn==0.12.3       # MIT          (M3 fraud / M4 churn resampling)
+statsmodels==0.14.2            # BSD-3-Clause (M7 liquidity, diagnostics)
+
+# --- gradient boosting -------------------------------------------------------
+lightgbm==4.5.0                # MIT          (primary tabular learner; warm-start L3)
+xgboost==2.1.1                 # Apache-2.0
+catboost==1.2.5                # Apache-2.0   (native categoricals baseline)
+
+# --- tuning & tracking (D4, D5) ---------------------------------------------
+optuna==3.6.1                  # MIT          (TPE + pruning + SQLite study resume)
+mlflow==2.15.1                 # Apache-2.0   (LOCAL file store - no server, no account)
+
+# --- explainability (D7, governance) ----------------------------------------
+shap==0.46.0                   # MIT
+
+# --- deep learning / PEFT (D4 Level 3) --------------------------------------
+torch==2.4.0                   # BSD-3-Clause (T4 GPU; CPU wheels also fine)
+transformers==4.44.2           # Apache-2.0   (FT-Transformer scaffolding)
+peft==0.12.0                   # Apache-2.0   (LoRA adapters per module head)
+
+# --- quantitative finance ----------------------------------------------------
+arch==7.0.0                    # NCSA (OSI-approved)  (GARCH volatility, VaR backtests)
+
+# --- visualisation -----------------------------------------------------------
+matplotlib==3.9.2              # Matplotlib licence (BSD-compatible, PSF-style)
+seaborn==0.13.2                # BSD-3-Clause
+
+# --- demo app (D2 app.py) ----------------------------------------------------
+gradio==4.44.0                 # Apache-2.0   (share=True needs no account/key;
+                               #               chosen over Streamlit for exactly that)
+
+# --- plumbing ----------------------------------------------------------------
+PyYAML==6.0.2                  # MIT
+joblib==1.4.2                  # BSD-3-Clause
+tqdm==4.66.5                   # MPL-2.0 AND MIT (dual)
+
+# --- quality gates (D9) ------------------------------------------------------
+pytest==8.3.2                  # MIT
+pytest-cov==5.0.0              # MIT
+ruff==0.6.4                    # MIT
+
+# =============================================================================
+# FONTS (not pip packages - fetched at runtime by novafin.utils.theme)
+#   Archivo   - SIL Open Font License 1.1  (chart headings)
+#   Tajawal   - SIL Open Font License 1.1  (chart body)
+#   DejaVu Sans - bundled with matplotlib, free  (offline fallback)
+#   Interstate - PROPRIETARY: referenced by NAME ONLY in .docx/.pptx, never
+#                embedded, never committed, never used for charts.
+#
+# DATA
+#   Synthetic NovaFin datasets - supplied by the course, educational use only.
+#   NOT redistributed in this repository (see .gitignore and docs/DATA.md).
+# =============================================================================

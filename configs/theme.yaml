@@ -1,0 +1,141 @@
+# =============================================================================
+# novafin-capstone/configs/theme.yaml
+# -----------------------------------------------------------------------------
+# Mubadala theme tokens - COLOURS AND FONTS ONLY.
+#
+# Source of truth for: every matplotlib figure, the D7 Word guide, the D8
+# PowerPoint deck and the D2 Gradio demo. No colour literal appears anywhere
+# else in this repository; `novafin.utils.theme.apply_theme()` is the only
+# consumer.
+#
+# FONT LICENCE NOTE (important for the "100% free and open-source" constraint):
+#   * Interstate is PROPRIETARY. It is referenced BY NAME ONLY in .docx/.pptx,
+#     where a locally installed copy renders it. No font bytes are committed,
+#     embedded or redistributed by this repository.
+#   * Charts use Archivo + Tajawal, both SIL Open Font License 1.1 (free),
+#     fetched at runtime from Google Fonts. Fallback is matplotlib's bundled
+#     DejaVu Sans (also free) if the download fails.
+# =============================================================================
+
+meta:
+  name: "Mubadala"
+  scope: "colours and fonts only"
+  source: "Mubadala DealCloud Data Quality Dashboard template (internal artefact)"
+
+# -----------------------------------------------------------------------------
+# Core palette
+# -----------------------------------------------------------------------------
+palette:
+  navy:      "#002B49"   # primary headings, deck title bars, table header fill
+  regent:    "#003B48"   # dark section backgrounds, divider slides
+  teal:      "#00B2A9"   # PRIMARY ACCENT - key metric, main chart series
+  steel:     "#00778B"   # secondary series
+  pine:      "#115E67"   # tertiary series, axis emphasis
+  sky:       "#8BD3E6"   # quaternary series, fills under curves
+  lteal:     "#B1E4E3"   # light fills, confidence bands, CV-variance ribbons
+  gold:      "#FFC72C"   # ALERT / RISK - fills and markers only (1.56:1 on white)
+  dgold:     "#B88F20"   # gold for LARGE text / bold marks only (3.01:1 = WCAG AA Large)
+  gold_text: "#7A5B00"   # gold for SMALL text on light (6.32:1 = WCAG AA normal)
+  indigo:    "#064975"   # fifth series, hyperlinks
+  charcoal:  "#333F48"   # body text, axis labels
+  silver:    "#C7C9C8"   # gridlines, disabled states
+  beige:     "#D6D2C4"   # neutral / benchmark series (e.g. equal-weight)
+  line:      "#E3E6E8"   # table rules, chart spines
+  card:      "#FFFFFF"   # card background
+  bg:        "#F4F5F6"   # page background
+  gold_bg:   "#FFF4D6"   # warning chip background
+  teal_bg:   "#E0F4F3"   # success chip background
+
+# -----------------------------------------------------------------------------
+# Semantic mapping - identical in guide, deck and every chart
+# -----------------------------------------------------------------------------
+semantic:
+  good: teal            # pass / approve / low risk          (fills, lines)
+  warning: gold         # review / medium risk               (fills, markers)
+  critical: dgold       # reject / high risk                 (fills, large labels)
+  neutral: beige        # benchmark (equal-weight, Black-Scholes, naive forecast)
+  info: sky
+  text: charcoal        # body copy                          10.80:1 on white
+  heading: navy         # headings                           14.57:1 on white
+  # Text-safe variants. MEASURED, not assumed - see tests/test_theme_and_hygiene.py.
+  # gold (#FFC72C) is 1.56:1 on white and must NEVER carry small text.
+  warning_text: gold_text   # 6.32:1
+  critical_text: gold_text  # 6.32:1
+  good_text: pine           # 7.44:1 (teal itself is only 2.64:1)
+
+# Decision-label colours used by every module's decision table
+decisions:
+  Approve:  teal
+  Review:   gold
+  Reject:   dgold
+  Fund:     teal
+  Protect:  steel
+  Maintain: silver
+  "Priority retention": gold
+  "Low-cost intervention": beige
+
+# -----------------------------------------------------------------------------
+# Chart colour cycles and ramps
+# -----------------------------------------------------------------------------
+cycles:
+  categorical: [teal, navy, gold, sky, pine, beige, indigo, silver]
+
+colormaps:
+  sequential:                 # heatmaps, correlation, SHAP magnitude
+    name: novafin_seq
+    stops: ["#FFFFFF", "#B1E4E3", "#00B2A9", "#115E67", "#002B49"]
+  diverging:                  # SHAP beeswarm, +/- returns, residuals
+    name: novafin_div
+    stops: ["#B88F20", "#FFC72C", "#FFFFFF", "#00B2A9", "#003B48"]
+
+# -----------------------------------------------------------------------------
+# Typography
+# -----------------------------------------------------------------------------
+fonts:
+  office:                     # .docx / .pptx - proprietary name, never embedded
+    heading: ["Interstate", "Aptos", "Segoe UI"]
+    body: ["Tajawal", "Aptos", "Segoe UI"]
+    mono: ["Consolas", "Courier New"]
+  charts:                     # matplotlib - SIL OFL 1.1 only
+    heading:
+      family: Archivo
+      licence: "SIL OFL 1.1"
+      google_fonts: true
+    body:
+      family: Tajawal
+      licence: "SIL OFL 1.1"
+      google_fonts: true
+    fallback:
+      family: DejaVu Sans
+      licence: "Bitstream Vera / public-domain-equivalent (bundled with matplotlib)"
+      google_fonts: false
+
+# -----------------------------------------------------------------------------
+# Matplotlib rcParams applied by apply_theme(). Figure sizes are chosen so a
+# saved PNG at dpi 200 drops into a 16:9 slide or an A4 page without rescaling.
+# -----------------------------------------------------------------------------
+matplotlib:
+  figure_dpi: 110
+  savefig_dpi: 200
+  figsize_default: [8.0, 4.5]      # 16:9 - deck
+  figsize_wide: [11.0, 4.5]
+  figsize_square: [6.0, 6.0]
+  font_size_base: 10
+  font_size_title: 13
+  font_size_label: 10
+  font_size_tick: 9
+  grid_alpha: 0.45
+  grid_linewidth: 0.6
+  spine_linewidth: 0.8
+  legend_frameon: false
+  axes_titlepad: 12
+
+# -----------------------------------------------------------------------------
+# Accessibility rules enforced in review (and asserted in tests/test_theme.py)
+# -----------------------------------------------------------------------------
+accessibility:
+  min_contrast_body: 4.5            # WCAG AA, normal text
+  min_contrast_large: 3.0           # WCAG AA, large text (>=18.66px bold / 24px)
+  gold_never_as_text_on_white: true # gold 1.56:1, dgold 3.01:1 -> small text uses
+                                    # gold_text #7A5B00 (6.32:1). Measured, not assumed.
+  encode_risk_by_marker_too: true   # never colour alone

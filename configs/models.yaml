@@ -1,0 +1,270 @@
+# =============================================================================
+# novafin-capstone/configs/models.yaml
+# -----------------------------------------------------------------------------
+# D4 LEVEL 1 - baseline models, defined in YAML ONLY.
+#
+# `models/build.py` resolves the dotted `class` path with importlib, so adding
+# a model is a config entry and never a code change. That is not a stylistic
+# preference: it is the foundation the D4 Level-4 "EXTRA FINE-TUNING" hook
+# plugs into, where a new tuning campaign must be launchable by editing YAML
+# with zero code changes.
+#
+# Ordering within each module is deliberate - trivial baseline first. A model
+# that cannot beat `DummyClassifier` or a seasonal-naive forecast has not
+# earned a place in the report, and stating that baseline is what turns a
+# metric into evidence.
+#
+# `scale: true` inserts a StandardScaler; trees do not need it and it is left
+# off for them so the fitted pipeline stays interpretable.
+# =============================================================================
+
+defaults:
+  n_jobs: -1
+  verbose: -1
+
+# -----------------------------------------------------------------------------
+# M1 - Strategic initiatives (180 rows, 76.7% positive)
+# Phase-2 power analysis: per-fold AUC standard error 0.096 (95% CI +/-0.188).
+# Small, heavily regularised models only; anything deep will memorise 180 rows.
+# -----------------------------------------------------------------------------
+initiatives:
+  - name: dummy_prior
+    class: sklearn.dummy.DummyClassifier
+    params: {strategy: prior}
+    scale: false
+  - name: logistic_l2
+    class: sklearn.linear_model.LogisticRegression
+    params: {C: 0.5, max_iter: 2000, class_weight: balanced}
+    scale: true
+  - name: random_forest
+    class: sklearn.ensemble.RandomForestClassifier
+    params: {n_estimators: 300, max_depth: 4, min_samples_leaf: 10, class_weight: balanced}
+    scale: false
+  - name: lightgbm
+    class: lightgbm.LGBMClassifier
+    params:
+      n_estimators: 200
+      learning_rate: 0.05
+      num_leaves: 7
+      min_child_samples: 15
+      reg_lambda: 5.0
+      subsample: 0.8
+      colsample_bytree: 0.8
+    scale: false
+
+# -----------------------------------------------------------------------------
+# M2 - Credit risk (5,000 rows, 19.94% default)
+# Calibration is the deliverable: PD feeds ECL = PD x LGD x EAD, so a
+# well-ranked but badly-calibrated model produces the wrong money.
+# -----------------------------------------------------------------------------
+loans:
+  - name: dummy_prior
+    class: sklearn.dummy.DummyClassifier
+    params: {strategy: prior}
+    scale: false
+  - name: logistic_l2
+    class: sklearn.linear_model.LogisticRegression
+    params: {C: 1.0, max_iter: 2000}
+    scale: true
+  - name: random_forest
+    class: sklearn.ensemble.RandomForestClassifier
+    params: {n_estimators: 400, max_depth: 8, min_samples_leaf: 20}
+    scale: false
+  - name: lightgbm
+    class: lightgbm.LGBMClassifier
+    params:
+      n_estimators: 400
+      learning_rate: 0.05
+      num_leaves: 31
+      min_child_samples: 40
+      subsample: 0.8
+      colsample_bytree: 0.8
+      reg_lambda: 1.0
+    scale: false
+  - name: xgboost
+    class: xgboost.XGBClassifier
+    params:
+      n_estimators: 400
+      learning_rate: 0.05
+      max_depth: 5
+      subsample: 0.8
+      colsample_bytree: 0.8
+      eval_metric: logloss
+    scale: false
+
+# -----------------------------------------------------------------------------
+# M3 - Fraud (30,000 rows, 2.28% positive)
+# scale_pos_weight rather than SMOTE: at a 43:1 ratio, synthetic minority rows
+# invent transactions that never happened and destroy calibration, which the
+# cost-threshold optimisation depends on.
+# -----------------------------------------------------------------------------
+transactions:
+  - name: dummy_prior
+    class: sklearn.dummy.DummyClassifier
+    params: {strategy: prior}
+    scale: false
+  - name: logistic_balanced
+    class: sklearn.linear_model.LogisticRegression
+    params: {C: 1.0, max_iter: 3000, class_weight: balanced}
+    scale: true
+  - name: lightgbm
+    class: lightgbm.LGBMClassifier
+    params:
+      n_estimators: 500
+      learning_rate: 0.05
+      num_leaves: 31
+      min_child_samples: 50
+      subsample: 0.8
+      colsample_bytree: 0.8
+      scale_pos_weight: 43.0
+    scale: false
+  - name: lightgbm_unweighted
+    class: lightgbm.LGBMClassifier
+    params:
+      n_estimators: 500
+      learning_rate: 0.05
+      num_leaves: 31
+      min_child_samples: 50
+    scale: false
+  - name: isolation_forest
+    class: sklearn.ensemble.IsolationForest
+    params: {n_estimators: 300, contamination: 0.023}
+    scale: true
+    unsupervised: true
+
+# -----------------------------------------------------------------------------
+# M4 - Churn (5,000 rows, 1.78% positive, 89 events)
+# The designed output is a NULL RESULT with a permutation test attached, not a
+# leaderboard position. Keep the candidate set small and honest.
+# -----------------------------------------------------------------------------
+customers:
+  - name: dummy_prior
+    class: sklearn.dummy.DummyClassifier
+    params: {strategy: prior}
+    scale: false
+  - name: logistic_balanced
+    class: sklearn.linear_model.LogisticRegression
+    params: {C: 0.1, max_iter: 3000, class_weight: balanced}
+    scale: true
+  - name: lightgbm
+    class: lightgbm.LGBMClassifier
+    params:
+      n_estimators: 200
+      learning_rate: 0.05
+      num_leaves: 15
+      min_child_samples: 50
+      scale_pos_weight: 55.0
+    scale: false
+
+# M4b - CLV regression. Framed as attribution, not forecasting (register L-07).
+customers_clv:
+  - name: mean_baseline
+    class: sklearn.dummy.DummyRegressor
+    params: {strategy: mean}
+    scale: false
+  - name: ridge
+    class: sklearn.linear_model.Ridge
+    params: {alpha: 1.0}
+    scale: true
+  - name: lightgbm
+    class: lightgbm.LGBMRegressor
+    params: {n_estimators: 400, learning_rate: 0.05, num_leaves: 31}
+    scale: false
+
+# -----------------------------------------------------------------------------
+# M5/M6 - Equity panel. Scored on rank IC, not RMSE.
+# Heavy regularisation: the signal-to-noise ratio in daily equity returns is
+# tiny, and an unregularised model fits nothing but noise.
+# -----------------------------------------------------------------------------
+market:
+  - name: zero_baseline
+    class: sklearn.dummy.DummyRegressor
+    params: {strategy: constant, constant: 0.0}
+    scale: false
+  - name: ridge
+    class: sklearn.linear_model.Ridge
+    params: {alpha: 10.0}
+    scale: true
+  - name: elasticnet
+    class: sklearn.linear_model.ElasticNet
+    params: {alpha: 0.001, l1_ratio: 0.5, max_iter: 5000}
+    scale: true
+  - name: lightgbm
+    class: lightgbm.LGBMRegressor
+    params:
+      n_estimators: 300
+      learning_rate: 0.03
+      num_leaves: 15
+      min_child_samples: 100
+      subsample: 0.8
+      colsample_bytree: 0.6
+      reg_lambda: 10.0
+    scale: false
+
+# -----------------------------------------------------------------------------
+# M7 - Liquidity. Beating the seasonal-naive baseline is the bar.
+# -----------------------------------------------------------------------------
+liquidity:
+  - name: mean_baseline
+    class: sklearn.dummy.DummyRegressor
+    params: {strategy: mean}
+    scale: false
+  - name: ridge
+    class: sklearn.linear_model.Ridge
+    params: {alpha: 1.0}
+    scale: true
+  - name: lightgbm
+    class: lightgbm.LGBMRegressor
+    params: {n_estimators: 300, learning_rate: 0.05, num_leaves: 15, min_child_samples: 20}
+    scale: false
+
+# -----------------------------------------------------------------------------
+# M10 - Derivatives. Two experiments, per leakage register L-04.
+#   fair fight : primitives only (S, K, T, sigma, r, type) vs the BS formula
+#   residual   : target = Market_Price - Black_Scholes_Price
+# -----------------------------------------------------------------------------
+options:
+  - name: mean_baseline
+    class: sklearn.dummy.DummyRegressor
+    params: {strategy: mean}
+    scale: false
+  - name: linear
+    class: sklearn.linear_model.LinearRegression
+    params: {}
+    scale: true
+  - name: random_forest
+    class: sklearn.ensemble.RandomForestRegressor
+    params: {n_estimators: 200, max_depth: 12, min_samples_leaf: 5}
+    scale: false
+  - name: lightgbm
+    class: lightgbm.LGBMRegressor
+    params: {n_estimators: 600, learning_rate: 0.05, num_leaves: 63, min_child_samples: 20}
+    scale: false
+  - name: mlp
+    class: sklearn.neural_network.MLPRegressor
+    params: {hidden_layer_sizes: [64, 64], max_iter: 400, early_stopping: true}
+    scale: true
+
+# -----------------------------------------------------------------------------
+# M9 - HFT, 3-class. Macro-F1 because FLAT is only 16.4% of rows.
+# -----------------------------------------------------------------------------
+hft:
+  - name: dummy_stratified
+    class: sklearn.dummy.DummyClassifier
+    params: {strategy: stratified}
+    scale: false
+  - name: logistic_multinomial
+    class: sklearn.linear_model.LogisticRegression
+    params: {C: 1.0, max_iter: 1000, class_weight: balanced}
+    scale: true
+  - name: lightgbm
+    class: lightgbm.LGBMClassifier
+    params:
+      n_estimators: 400
+      learning_rate: 0.05
+      num_leaves: 63
+      min_child_samples: 100
+      subsample: 0.8
+      colsample_bytree: 0.8
+      class_weight: balanced
+    scale: false
